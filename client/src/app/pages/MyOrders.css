@@ -1,0 +1,8 @@
+.my-orders__summary {
+  justify-content: flex-end;
+}
+
+.my-orders__empty {
+  text-align: center;
+  padding: 40px;
+}

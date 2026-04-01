@@ -1,0 +1,102 @@
+.service-detail__back {
+  margin-bottom: 16px;
+}
+
+.service-detail__hero {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.service-detail__image-wrap {
+  flex: 1 1 300px;
+  max-width: 400px;
+}
+
+.service-detail__image {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.service-detail__info {
+  flex: 1;
+  min-width: 280px;
+}
+
+.service-detail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.service-detail__title {
+  margin: 0;
+}
+
+.service-detail__rating {
+  margin-bottom: 16px;
+}
+
+.service-detail__rating-text {
+  margin-left: 8px;
+}
+
+.service-detail__description-list {
+  margin-top: 24px;
+}
+
+.service-detail__price {
+  font-size: 18px;
+}
+
+.service-detail__order-button {
+  margin-top: 24px;
+}
+
+.service-detail__card--spaced {
+  margin-top: 24px;
+}
+
+.service-detail__rating-small {
+  font-size: 12px;
+}
+
+.service-detail__review-comment {
+  margin-top: 8px;
+}
+
+.service-detail__date-picker {
+  width: 100%;
+}
+
+.service-detail__time-alert {
+  margin-bottom: 16px;
+}
+
+.service-detail__time-group {
+  width: 100%;
+}
+
+.service-detail__time-list {
+  width: 100%;
+}
+
+.service-detail__time-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 8px;
+}
+
+.service-detail__time-slot {
+  text-align: center;
+}
+
+.service-detail__time-slot--unavailable {
+  background: #f5f5f5;
+  color: #bfbfbf;
+}

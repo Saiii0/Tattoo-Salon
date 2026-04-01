@@ -1,0 +1,31 @@
+.admin-stats__title {
+  margin-bottom: 24px;
+}
+
+.admin-stats__row {
+  margin-top: 24px;
+}
+
+.admin-stats__card {
+  margin-top: 24px;
+}
+
+.admin-stats__stat--revenue .ant-statistic-content {
+  color: #1890ff;
+}
+
+.admin-stats__stat--services .ant-statistic-content {
+  color: #52c41a;
+}
+
+.admin-stats__stat--rating .ant-statistic-content {
+  color: #faad14;
+}
+
+.admin-stats__stat--completed .ant-statistic-content {
+  color: #52c41a;
+}
+
+.admin-stats__stat--pending .ant-statistic-content {
+  color: #faad14;
+}

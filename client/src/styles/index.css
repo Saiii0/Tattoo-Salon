@@ -1,0 +1,19 @@
+@import './fonts.css';
+@import './theme.css';
+
+/* Reset default Ant Design styles to work with viewport 1440px */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}

@@ -1,0 +1,24 @@
+.favorites__title {
+  margin-bottom: 24px;
+}
+
+.favorites__service-image {
+  height: 240px;
+  object-fit: cover;
+}
+
+.favorites__rating {
+  font-size: 14px;
+}
+
+.favorites__price {
+  margin-top: 8px;
+}
+
+.favorites__price-text {
+  font-size: 16px;
+}
+
+.favorites__reviews-text {
+  font-size: 12px;
+}

@@ -1,0 +1,7 @@
+.manage-services__image .ant-image-img {
+  object-fit: cover;
+}
+
+.manage-services__input-number {
+  width: 100%;
+}
