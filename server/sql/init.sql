@@ -1,4 +1,16 @@
--- Run this inside the tattoo_salon database
+-- Run this from a superuser connection (e.g. postgres), then connect to tattoo22.
+-- This block creates the database if it doesn't exist.
+do $$
+begin
+  if not exists (select 1 from pg_database where datname = 'tattoo22') then
+    create database tattoo22;
+  end if;
+end $$;
+
+-- After creating the DB, connect to it (psql):
+-- \c tattoo22
+
+-- Schema and seed data for tattoo22
 create table if not exists users (
   id bigserial primary key,
   email text not null unique,
