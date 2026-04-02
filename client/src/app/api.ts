@@ -151,6 +151,12 @@ export const ordersApi = {
   },
 };
 
+export const mastersApi = {
+  async list() {
+    return request('/masters');
+  },
+};
+
 export const favoritesApi = {
   async list() {
     return request('/favorites');
@@ -164,8 +170,13 @@ export const favoritesApi = {
 };
 
 export const scheduleApi = {
-  async get(date: string, serviceId: string) {
-    return request(`/schedule?date=${encodeURIComponent(date)}&serviceId=${encodeURIComponent(serviceId)}`);
+  async get(date: string, serviceId: string, masterId?: string) {
+    const params = new URLSearchParams({
+      date,
+      serviceId,
+    });
+    if (masterId) params.set('masterId', masterId);
+    return request(`/schedule?${params.toString()}`);
   },
 };
 

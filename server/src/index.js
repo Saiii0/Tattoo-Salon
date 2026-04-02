@@ -209,6 +209,42 @@ const recalcMasterStats = async (masterId) => {
   )
 }
 
+const applyReviewReaction = async (userId, reviewId, reaction) => {
+  await pool.query('begin')
+  try {
+    const current = await pool.query(
+      'select reaction from review_reactions where user_id = $1 and review_id = $2',
+      [userId, reviewId]
+    )
+    const prev = current.rows[0]?.reaction
+
+    if (!prev) {
+      await pool.query(
+        'insert into review_reactions (user_id, review_id, reaction) values ($1, $2, $3)',
+        [userId, reviewId, reaction]
+      )
+      const field = reaction === 'like' ? 'likes' : 'dislikes'
+      await pool.query(`update reviews set ${field} = ${field} + 1 where id = $1`, [reviewId])
+    } else if (prev !== reaction) {
+      const decField = prev === 'like' ? 'likes' : 'dislikes'
+      const incField = reaction === 'like' ? 'likes' : 'dislikes'
+      await pool.query(`update reviews set ${decField} = greatest(${decField} - 1, 0) where id = $1`, [
+        reviewId,
+      ])
+      await pool.query(`update reviews set ${incField} = ${incField} + 1 where id = $1`, [reviewId])
+      await pool.query(
+        'update review_reactions set reaction = $1 where user_id = $2 and review_id = $3',
+        [reaction, userId, reviewId]
+      )
+    }
+
+    await pool.query('commit')
+  } catch (err) {
+    await pool.query('rollback')
+    throw err
+  }
+}
+
 app.use(cors())
 app.use(express.json())
 app.use('/uploads', express.static(uploadsDir))
@@ -237,6 +273,69 @@ const swaggerSpec = swaggerJSDoc({
           responses: {
             200: { description: 'OK' },
             500: { description: 'DB connection failed' },
+          },
+        },
+      },
+      '/api/auth/register': {
+        post: {
+          summary: 'Register user',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['name', 'email', 'password'],
+                  properties: {
+                    name: { type: 'string' },
+                    email: { type: 'string', format: 'email' },
+                    password: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            201: { description: 'Created' },
+            400: { description: 'Validation error' },
+            409: { description: 'Email exists' },
+            500: { description: 'Server error' },
+          },
+        },
+      },
+      '/api/auth/login': {
+        post: {
+          summary: 'Login user',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['email', 'password'],
+                  properties: {
+                    email: { type: 'string', format: 'email' },
+                    password: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'OK' },
+            400: { description: 'Validation error' },
+            401: { description: 'Invalid credentials' },
+            500: { description: 'Server error' },
+          },
+        },
+      },
+      '/api/auth/me': {
+        get: {
+          summary: 'Get current user',
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: { description: 'OK' },
+            401: { description: 'Unauthorized' },
           },
         },
       },
@@ -353,6 +452,18 @@ app.get('/api/users', authenticateJwt, requireRole(['admin']), async (_req, res)
     return res.json(result.rows.map(mapUserRow))
   } catch (err) {
     console.error('Users fetch failed:', err.message)
+    return res.status(500).json({ message: 'server error' })
+  }
+})
+
+app.get('/api/masters', async (_req, res) => {
+  try {
+    const result = await pool.query(
+      "select id, name, email, role, avatar, rating, services_count, created_at from users where role = 'master' order by rating desc"
+    )
+    return res.json(result.rows.map(mapUserRow))
+  } catch (err) {
+    console.error('Masters fetch failed:', err.message)
     return res.status(500).json({ message: 'server error' })
   }
 })
@@ -654,14 +765,12 @@ app.post('/api/reviews', authenticateJwt, requireRole(['user']), async (req, res
 app.patch('/api/reviews/:id/like', authenticateJwt, async (req, res) => {
   const reviewId = Number(req.params.id)
   try {
-    const result = await pool.query(
-      'update reviews set likes = likes + 1 where id = $1 returning likes',
-      [reviewId]
-    )
+    await applyReviewReaction(req.user.id, reviewId, 'like')
+    const result = await pool.query('select likes, dislikes from reviews where id = $1', [reviewId])
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'review not found' })
     }
-    return res.json({ likes: result.rows[0].likes })
+    return res.json({ likes: result.rows[0].likes, dislikes: result.rows[0].dislikes })
   } catch (err) {
     console.error('Review like failed:', err.message)
     return res.status(500).json({ message: 'server error' })
@@ -671,14 +780,12 @@ app.patch('/api/reviews/:id/like', authenticateJwt, async (req, res) => {
 app.patch('/api/reviews/:id/dislike', authenticateJwt, async (req, res) => {
   const reviewId = Number(req.params.id)
   try {
-    const result = await pool.query(
-      'update reviews set dislikes = dislikes + 1 where id = $1 returning dislikes',
-      [reviewId]
-    )
+    await applyReviewReaction(req.user.id, reviewId, 'dislike')
+    const result = await pool.query('select likes, dislikes from reviews where id = $1', [reviewId])
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'review not found' })
     }
-    return res.json({ dislikes: result.rows[0].dislikes })
+    return res.json({ likes: result.rows[0].likes, dislikes: result.rows[0].dislikes })
   } catch (err) {
     console.error('Review dislike failed:', err.message)
     return res.status(500).json({ message: 'server error' })
@@ -746,6 +853,19 @@ app.get('/api/orders', authenticateJwt, async (req, res) => {
          order by o.date desc`,
         [req.user.id]
       )
+    } else if (req.user.role === 'master') {
+      result = await pool.query(
+        `select o.*, s.name as service_name,
+                u.name as user_name, u.avatar as user_avatar,
+                m.name as master_name, m.avatar as master_avatar
+         from orders o
+         join services s on s.id = o.service_id
+         join users u on u.id = o.user_id
+         left join users m on m.id = o.master_id
+         where o.master_id = $1
+         order by o.date desc`,
+        [req.user.id]
+      )
     } else {
       result = await pool.query(
         `select o.*, s.name as service_name,
@@ -783,8 +903,8 @@ app.get('/api/orders', authenticateJwt, async (req, res) => {
 })
 
 app.post('/api/orders', authenticateJwt, requireRole(['user']), async (req, res) => {
-  const { serviceId, date, timeSlot } = req.body || {}
-  if (!serviceId || !date || !timeSlot) {
+  const { serviceId, date, timeSlot, masterId } = req.body || {}
+  if (!serviceId || !date || !timeSlot || !masterId) {
     return res.status(400).json({ message: 'missing fields' })
   }
   try {
@@ -792,13 +912,47 @@ app.post('/api/orders', authenticateJwt, requireRole(['user']), async (req, res)
     if (serviceResult.rows.length === 0) {
       return res.status(404).json({ message: 'service not found' })
     }
+    const masterResult = await pool.query(
+      "select id from users where id = $1 and role = 'master'",
+      [masterId]
+    )
+    if (masterResult.rows.length === 0) {
+      return res.status(400).json({ message: 'invalid master' })
+    }
+
+    const scheduleResult = await pool.query(
+      `select o.*, s.duration as service_duration
+       from orders o
+       join services s on s.id = o.service_id
+       where o.date = $1 and o.status not in ('rejected', 'cancelled') and o.master_id = $2`,
+      [date, masterId]
+    )
+
+    const duration = (await pool.query('select duration from services where id = $1', [serviceId]))
+      .rows[0].duration
+    const busyIntervals = scheduleResult.rows.map((row) => {
+      const [h, m] = row.time_slot.split(':').map(Number)
+      const start = h * 60 + m
+      return { start, end: start + row.service_duration }
+    })
+    const startMinutes = (() => {
+      const [h, m] = String(timeSlot).split(':').map(Number)
+      return h * 60 + m
+    })()
+    const endMinutes = startMinutes + duration
+    const overlaps = busyIntervals.some((interval) => startMinutes < interval.end && endMinutes > interval.start)
+    const busyMinutes = busyIntervals.reduce((sum, row) => sum + (row.end - row.start), 0)
+
+    if (overlaps || busyMinutes + duration > 600) {
+      return res.status(400).json({ message: 'time slot not available' })
+    }
 
     const price = serviceResult.rows[0].price
     const result = await pool.query(
-      `insert into orders (service_id, user_id, status, date, time_slot, price)
-       values ($1, $2, 'pending', $3, $4, $5)
+      `insert into orders (service_id, user_id, status, date, time_slot, price, master_id)
+       values ($1, $2, 'pending', $3, $4, $5, $6)
        returning *`,
-      [serviceId, req.user.id, date, timeSlot, price]
+      [serviceId, req.user.id, date, timeSlot, price, masterId]
     )
     return res.status(201).json({ id: String(result.rows[0].id) })
   } catch (err) {
@@ -901,9 +1055,9 @@ app.delete('/api/favorites/:serviceId', authenticateJwt, requireRole(['user']), 
 })
 
 app.get('/api/schedule', async (req, res) => {
-  const { date, serviceId } = req.query
-  if (!date || !serviceId) {
-    return res.status(400).json({ message: 'date and serviceId are required' })
+  const { date, serviceId, masterId } = req.query
+  if (!date || !serviceId || !masterId) {
+    return res.status(400).json({ message: 'date, serviceId and masterId are required' })
   }
   try {
     const serviceResult = await pool.query('select duration from services where id = $1', [serviceId])
@@ -912,47 +1066,57 @@ app.get('/api/schedule', async (req, res) => {
     }
 
     const duration = serviceResult.rows[0].duration
-    const mastersResult = await pool.query("select id from users where role = 'master'")
-    const masters = mastersResult.rows.map((row) => row.id)
+    const masterFilter = Number(masterId)
 
     const ordersResult = await pool.query(
-      `select o.*, s.duration as service_duration
+      `select o.*, s.duration as service_duration, s.name as service_name
        from orders o
        join services s on s.id = o.service_id
-       where o.date = $1 and o.status not in ('rejected', 'cancelled')`,
-      [date]
+       where o.date = $1 and o.status not in ('rejected', 'cancelled') and o.master_id = $2`,
+      [date, masterFilter]
     )
 
     const workStart = 9
     const workEnd = 21
+    const stepMinutes = 30
     const slots = []
 
-    const masterSchedule = {}
-    const masterBusyAtTime = {}
-
-    ordersResult.rows.forEach((order) => {
-      if (order.master_id) {
-        masterSchedule[order.master_id] =
-          (masterSchedule[order.master_id] || 0) + order.service_duration
-        masterBusyAtTime[order.master_id] = masterBusyAtTime[order.master_id] || new Set()
-        masterBusyAtTime[order.master_id].add(order.time_slot)
+    const busyIntervals = ordersResult.rows.map((order) => {
+      const [h, m] = order.time_slot.split(':').map(Number)
+      const start = h * 60 + m
+      return {
+        start,
+        end: start + order.service_duration,
+        label: order.service_name,
       }
     })
 
-    for (let hour = workStart; hour < workEnd; hour++) {
-      const time = `${String(hour).padStart(2, '0')}:00`
-      const isOccupied = ordersResult.rows.some((order) => order.time_slot === time)
+    const totalBusyMinutes = busyIntervals.reduce((sum, item) => sum + (item.end - item.start), 0)
 
-      const hasAvailableMaster = masters.some((masterId) => {
-        const busyMinutes = masterSchedule[masterId] || 0
-        const busyTimes = masterBusyAtTime[masterId] || new Set()
-        return busyMinutes + duration <= 600 && !busyTimes.has(time)
+    const startMinutes = workStart * 60
+    const endMinutes = workEnd * 60
+
+    for (let time = startMinutes; time + duration <= endMinutes; time += stepMinutes) {
+      const overlaps = busyIntervals.some((interval) => {
+        return time < interval.end && time + duration > interval.start
       })
 
-      slots.push({ time, available: !isOccupied && hasAvailableMaster })
+      const available = !overlaps && totalBusyMinutes + duration <= 600
+      const hours = Math.floor(time / 60)
+      const minutes = time % 60
+      slots.push({
+        time: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+        available,
+      })
     }
 
-    return res.json(slots)
+    const busy = busyIntervals.map((item) => ({
+      start: `${String(Math.floor(item.start / 60)).padStart(2, '0')}:${String(item.start % 60).padStart(2, '0')}`,
+      end: `${String(Math.floor(item.end / 60)).padStart(2, '0')}:${String(item.end % 60).padStart(2, '0')}`,
+      label: item.label,
+    }))
+
+    return res.json({ slots, busy, totalBusyMinutes })
   } catch (err) {
     console.error('Schedule fetch failed:', err.message)
     return res.status(500).json({ message: 'server error' })

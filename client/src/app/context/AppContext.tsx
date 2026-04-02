@@ -49,8 +49,9 @@ interface AppContextType {
   toggleFavorite: (serviceId: string) => Promise<void>;
   getAvailableTimeSlots: (
     date: string,
-    serviceId: string
-  ) => Promise<{ time: string; available: boolean }[]>;
+    serviceId: string,
+    masterId?: string
+  ) => Promise<{ slots: { time: string; available: boolean }[]; busy: { start: string; end: string; label: string }[]; totalBusyMinutes: number }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -263,6 +264,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       serviceId: order.serviceId,
       date: order.date,
       timeSlot: order.timeSlot,
+      masterId: order.masterId,
     });
     await loadOrders();
   };
@@ -289,8 +291,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const getAvailableTimeSlots = async (date: string, serviceId: string) => {
-    return scheduleApi.get(date, serviceId);
+  const getAvailableTimeSlots = async (date: string, serviceId: string, masterId?: string) => {
+    return scheduleApi.get(date, serviceId, masterId);
   };
 
   return (

@@ -17,6 +17,7 @@ import {
   DatePicker,
   Radio,
   Alert,
+  Select,
 } from 'antd';
 import {
   HeartOutlined,
@@ -29,8 +30,8 @@ import {
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router';
 import { useAppContext } from '../context/AppContext';
-import { servicesApi } from '../api';
-import type { ClientHistory } from '../types';
+import { servicesApi, mastersApi } from '../api';
+import type { ClientHistory, User } from '../types';
 import dayjs, { Dayjs } from 'dayjs';
 import './ServiceDetail.css';
 
@@ -59,10 +60,14 @@ export const ServiceDetail: React.FC = () => {
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null);
   const [selectedTime, setSelectedTime] = useState<string>('');
+  const [selectedMasterId, setSelectedMasterId] = useState<string>('');
   const [reviewForm] = Form.useForm();
   const [serviceHistory, setServiceHistory] = useState<ClientHistory[]>([]);
   const [timeSlots, setTimeSlots] = useState<{ time: string; available: boolean }[]>([]);
+  const [busySlots, setBusySlots] = useState<{ start: string; end: string; label: string }[]>([]);
+  const [totalBusyMinutes, setTotalBusyMinutes] = useState(0);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [masters, setMasters] = useState<User[]>([]);
 
   const service = services.find((s) => s.id === id);
   const serviceReviews = reviews.filter((r) => r.serviceId === id);
@@ -120,8 +125,8 @@ export const ServiceDetail: React.FC = () => {
   };
 
   const handleOrder = async () => {
-    if (!currentUser || !selectedDate || !selectedTime) {
-      message.error('Выберите дату и время записи');
+    if (!currentUser || !selectedDate || !selectedTime || !selectedMasterId) {
+      message.error('Выберите мастера, дату и время записи');
       return;
     }
 
@@ -132,6 +137,7 @@ export const ServiceDetail: React.FC = () => {
       userId: currentUser.id,
       userName: currentUser.name,
       userAvatar: currentUser.avatar,
+      masterId: selectedMasterId,
       status: 'pending' as const,
       date: selectedDate.format('YYYY-MM-DD'),
       timeSlot: selectedTime,
@@ -144,6 +150,7 @@ export const ServiceDetail: React.FC = () => {
       setIsOrderModalOpen(false);
       setSelectedDate(null);
       setSelectedTime('');
+      setSelectedMasterId('');
     } catch {
       message.error('Не удалось отправить заявку');
     }
@@ -155,15 +162,23 @@ export const ServiceDetail: React.FC = () => {
   }, [id]);
 
   useEffect(() => {
-    if (!selectedDate || !service) {
+    mastersApi.list().then(setMasters).catch(() => setMasters([]));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedDate || !service || !selectedMasterId) {
       setTimeSlots([]);
       return;
     }
     setIsLoadingSlots(true);
-    getAvailableTimeSlots(selectedDate.format('YYYY-MM-DD'), service.id)
-      .then(setTimeSlots)
+    getAvailableTimeSlots(selectedDate.format('YYYY-MM-DD'), service.id, selectedMasterId)
+      .then((data) => {
+        setTimeSlots(data.slots || []);
+        setBusySlots(data.busy || []);
+        setTotalBusyMinutes(data.totalBusyMinutes || 0);
+      })
       .finally(() => setIsLoadingSlots(false));
-  }, [selectedDate, service, getAvailableTimeSlots]);
+  }, [selectedDate, service, selectedMasterId, getAvailableTimeSlots]);
 
   const disabledDate = (current: Dayjs) => {
     // Запрет на выбор прошлых дат
@@ -415,10 +430,11 @@ export const ServiceDetail: React.FC = () => {
           setIsOrderModalOpen(false);
           setSelectedDate(null);
           setSelectedTime('');
+          setSelectedMasterId('');
         }}
         okText="Подтвердить запись"
         cancelText="Отмена"
-        okButtonProps={{ disabled: !selectedDate || !selectedTime }}
+        okButtonProps={{ disabled: !selectedDate || !selectedTime || !selectedMasterId }}
         width="min(600px, 90vw)"
       >
         <Divider />
@@ -434,6 +450,24 @@ export const ServiceDetail: React.FC = () => {
         <Divider />
 
         <Form layout="vertical">
+          <Form.Item label="Выберите мастера" required>
+            <Select
+              placeholder="Выберите мастера"
+              value={selectedMasterId || undefined}
+              onChange={(value) => {
+                setSelectedMasterId(value);
+                setSelectedDate(null);
+                setSelectedTime('');
+              }}
+            >
+              {masters.map((master) => (
+                <Select.Option key={master.id} value={master.id}>
+                  {master.name} {master.rating ? `(${master.rating.toFixed(1)})` : ''}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+
           <Form.Item label="Выберите дату" required>
             <DatePicker
               className="service-detail__date-picker"
@@ -445,6 +479,7 @@ export const ServiceDetail: React.FC = () => {
                 setSelectedDate(date);
                 setSelectedTime(''); // Сбрасываем время при смене даты
               }}
+              disabled={!selectedMasterId}
             />
           </Form.Item>
 
@@ -452,7 +487,7 @@ export const ServiceDetail: React.FC = () => {
             <Form.Item label="Выберите время" required>
               <Alert
                 title="Доступные временные слоты"
-                description="Свободные слоты отображаются синим цветом, занятые — серым. Один мастер может принимать заказы на максимум 10 часов в день."
+                description="Слоты рассчитаны по выбранному мастеру с учетом длительности услуги и его реальной занятости."
                 type="info"
                 showIcon
                 className="service-detail__time-alert"
@@ -494,6 +529,37 @@ export const ServiceDetail: React.FC = () => {
               type="success"
               showIcon
             />
+          </>
+        )}
+
+        {selectedDate && selectedMasterId && (
+          <>
+            <Divider />
+            <Card size="small" title="График мастера на выбранную дату">
+              <Space direction="vertical" size={8}>
+                <Text type="secondary">
+                  Занято времени: {(totalBusyMinutes / 60).toFixed(1)} ч
+                </Text>
+                {busySlots.length === 0 ? (
+                  <Text type="secondary">Свободный день</Text>
+                ) : (
+                  <List
+                    size="small"
+                    dataSource={busySlots}
+                    renderItem={(item) => (
+                      <List.Item>
+                        <Space>
+                          <Tag color="default">
+                            {item.start}–{item.end}
+                          </Tag>
+                          <Text>{item.label}</Text>
+                        </Space>
+                      </List.Item>
+                    )}
+                  />
+                )}
+              </Space>
+            </Card>
           </>
         )}
       </Modal>
