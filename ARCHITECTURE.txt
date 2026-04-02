@@ -1,186 +1,205 @@
-Документ: Архитектура и структура приложения "Тату Салон"
-Дата: 2026-03-13
+Документ: Архитектура и структура приложения "Tattoo Salon"
+Дата: 2026-04-02
 
-1) Обзор
-Приложение — SPA на React + TypeScript + Vite. Навигация реализована через React Router. Данные хранятся в памяти на клиенте и инициализируются мок‑данными. Глобальное состояние и бизнес‑логика объединены в AppContext (React Context). UI — Ant Design, стили страниц вынесены в отдельные CSS‑файлы.
+1) Суть проекта в одном абзаце
+Это веб‑приложение для тату‑салона. Есть клиент (SPA на React), сервер (Express API) и база данных (PostgreSQL). Клиент рисует страницы и при любом действии ходит на сервер по HTTP. Сервер валидирует права, читает и пишет данные в базу, возвращает JSON. Авторизация через JWT, токен хранится в localStorage.
 
-2) Технологический стек и ключевые зависимости
-- React 18 + TypeScript
-- Vite (сборка/дев‑сервер)
-- React Router v7 (маршрутизация)
-- Ant Design (UI‑компоненты)
-- Day.js (работа с датами)
-- Дополнительные пакеты: @ant-design/icons, recharts (для графиков, если потребуется), и др.
+2) Общая схема, «кто откуда что подтягивает»
+UI (React страницы) -> AppContext -> api.ts -> fetch('/api/...')
+fetch -> Vite proxy -> Express сервер -> PostgreSQL
+PostgreSQL -> Express сервер -> JSON ответ
+JSON -> AppContext state -> UI ререндер
 
-3) Структура папок (src)
-src/
-  main.tsx             — точка входа: монтирует React и подключает глобальные стили
-  styles/              — глобальные CSS (fonts.css, index.css, theme.css)
-  app/
-    App.tsx            — рендерит RouterProvider с конфигурацией роутов
-    routes.tsx         — декларация маршрутов, корневой провайдер контекста
-    types.ts           — общие типы доменной модели
-    data/mockData.ts   — мок‑данные: users, services, reviews, orders, favorites
-    context/
-      AppContext.tsx   — глобальное состояние и бизнес‑логика
-    components/
-      Layout.tsx       — основной каркас приложения (sidebar, header, content)
-      ProtectedRoute.tsx — защита приватных маршрутов
-    pages/             — все страницы приложения + локальные CSS на каждую страницу
+Файлы, которые держат эту цепочку:
+- Клиент вызывает API: client/src/app/api.ts
+- Клиент хранит состояние: client/src/app/context/AppContext.tsx
+- Сервер обрабатывает API: server/src/index.js
+- Сервер ходит в БД: server/src/db.js
+- БД схема и сиды: server/sql/migrations/*.sql
 
-4) Точка входа и глобальные стили
-Файл src/main.tsx:
-- Импортирует App и глобальный CSS: src/styles/index.css
-- Монтирует приложение в #root
+3) Что где лежит (минимальная карта)
+Корень проекта
+- client/ — фронтенд (React + TypeScript + Vite)
+- server/ — бэкенд (Express + PostgreSQL)
+- ARCHITECTURE.txt — этот документ
 
-Файл src/styles/index.css:
-- Импортирует fonts.css и theme.css
-- Содержит базовый reset: box-sizing, размеры html/body/#root
+4) Клиент (front)
+4.1 Точка входа
+Файл client/src/main.tsx
+- Поднимает React приложение
+- Подключает глобальные стили
 
-Файл src/styles/theme.css:
-- Переменные дизайна (цвета, радиусы, размеры шрифтов)
-- Базовая типографика (h1-h4, label, button, input)
+4.2 Роуты и защита
+Файл client/src/app/routes.tsx
+- /login, /register — публичные
+- Внутренние страницы оборачиваются в ProtectedRoute
+- Для admin/master/user есть отдельные ограничения
 
-5) Маршрутизация
-Файл src/app/routes.tsx:
-- Создает router через createBrowserRouter
-- Корневой уровень оборачивает все маршруты в AppProvider (Root -> AppContext)
-- Публичные маршруты:
-  /login — вход
-  /register — регистрация
-- Приватный корень "/" защищен через ProtectedRoute:
-  /            — Home
-  /favorites   — Favorites
-  /service/:id — ServiceDetail
-  /profile     — Profile
-  /manage-services — ManageServices (admin)
-  /user-management — UserManagement (admin)
-  /orders      — Orders (master)
-  /my-orders   — MyOrders (user)
-  /master-stats — MasterStats (master)
-  /admin-stats  — AdminStats (admin)
-  *            — NotFound
+Файл client/src/app/components/ProtectedRoute.tsx
+- Если не авторизован: показывает Unauthorized
+- Если роль не подходит: показывает Forbidden
 
-Почему так:
-- ProtectedRoute проверяет авторизацию через AppContext и редиректит на /login при отсутствии сессии.
-- Layout применяется к приватной части, чтобы все внутренние страницы имели единый каркас.
+4.3 Глобальное состояние
+Файл client/src/app/context/AppContext.tsx
+- Держит currentUser, users, services, orders, reviews, favorites
+- Инициализирует данные через API при старте
+- После login/register сохраняет токен и загружает данные
 
-6) Каркас приложения
-Файл src/app/components/Layout.tsx:
-- Ant Layout: Sidebar (Sider), Header, Content
-- Меню строится динамически по роли пользователя:
-  user: главная, избранное, мои заказы
-  master: заявки, статистика
-  admin: управление услугами, пользователи, статистика
-- Адаптивность:
-  ширина < 768px -> меню уходит в Drawer
-- В шапке — аватар и dropdown с "Профиль" / "Выйти"
+4.4 Как клиент ходит на сервер
+Файл client/src/app/api.ts
+- Базовый url: /api
+- Если есть токен, кладет Authorization: Bearer <token>
+- Возвращает JSON или кидает ошибку
 
-7) Глобальное состояние и бизнес‑логика
-Файл src/app/context/AppContext.tsx:
-Хранит:
-- currentUser (текущий пользователь), users, services, reviews, orders, favorites
-Инициализация:
-- Данные берутся из mockData.ts
-- currentUser восстанавливается из localStorage по ключу currentUserId
+4.5 Проксирование запросов
+Файл client/vite.config.ts
+- /api и /uploads идут на http://localhost:3001
+- Поэтому в коде можно писать просто /api/..., не указывая хост
 
-Основные операции:
-- Аутентификация: login, logout, register
-- Пользователи: addUser, updateUser, deleteUser
-- Услуги: addService, updateService, deleteService
-- Отзывы: addReview, deleteReview, likeReview, dislikeReview
-  При addReview пересчитывается рейтинг и количество отзывов услуги
-- Заказы: addOrder, updateOrder, updateOrderStatus
-- Избранное: toggleFavorite
-- Расписание:
-  getAvailableTimeSlots(date, serviceDuration) — формирует слоты по 1 часу и проверяет
-  доступность мастеров с учетом ограничения 10 часов в день
+4.6 Типы данных
+Файл client/src/app/types.ts
+- User, Service, Order, Review и прочие типы
+- Вся логика в клиентах опирается на эти типы
 
-Почему контекст:
-- Все страницы и компоненты имеют доступ к одному источнику правды без передачи пропсов по цепочке
-- Логика централизована и легко отслеживается
+4.7 Важно
+Файл client/src/app/data/mockData.ts есть, но сейчас НЕ используется.
+Данные берутся с сервера, а не из моков.
 
-8) Модель данных
-Файл src/app/types.ts:
-- User (роль: user/master/admin, аватар, дата регистрации, доп. поля рейтинга для мастера)
-- Service (цена, длительность, рейтинг, количество отзывов)
-- Review (лайки/дизлайки, опциональный deleted)
-- Order (статусы, дата, время, связь с мастером)
-- Доп. типы для расписаний (TimeSlot, DaySchedule)
+5) Сервер (back)
+5.1 Точка входа
+Файл server/src/index.js
+- Запускает Express
+- Подключает CORS, JSON парсинг
+- Настраивает JWT
+- Подключает Swagger UI на /api/docs
+- Раздает статические файлы /uploads
 
-9) Мок‑данные
-Файл src/app/data/mockData.ts:
-- Наборы пользователей, услуг, отзывов и заказов для демонстрации
-- Используются при старте как "база данных" в памяти
+5.2 Подключение к базе
+Файл server/src/db.js
+- Использует переменные окружения из server/.env
+- Подключается к PostgreSQL
 
-10) Страницы и их роли
-Все страницы лежат в src/app/pages и имеют локальный CSS файл.
+5.3 Миграции и сиды
+Файл server/src/migrate.js
+- Создает БД (если нет)
+- Применяет SQL из server/sql/migrations
 
-Home:
-- Список услуг
-- Клик по карточке -> /service/:id
+5.4 Файлы миграций
+server/sql/migrations/001_schema.sql
+- Таблицы users, services, orders, reviews, favorites, client_history
 
-Favorites:
-- Список избранных услуг
-- Пустое состояние при отсутствии избранного
+server/sql/migrations/002_seed.sql
+- Начальные пользователи и данные
 
-ServiceDetail:
-- Детальная страница услуги
-- Добавление в избранное
-- Список отзывов, лайки/дизлайки, удаление админом
-- Форма добавления отзыва (модал)
-- Запись на услугу: выбор даты/времени, проверка доступности
+server/sql/migrations/004_review_reactions.sql
+- Таблица реакций на отзывы (лайк/дизлайк)
 
-Profile:
-- Данные пользователя, роль
-- Для мастера показываются рейтинг и количество услуг
-- Модал смены аватара (демо: генерация случайного изображения)
+6) Основные API эндпоинты
+Серверный файл: server/src/index.js
 
-ManageServices (admin):
-- Таблица услуг, добавление/редактирование/удаление
-- Форма в модале
+Аутентификация
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
 
-UserManagement (admin):
-- Таблица пользователей, создание/редактирование/удаление
-- Защита от удаления самого себя
+Пользователи
+- GET /api/users (admin)
+- POST /api/users (admin)
+- PATCH /api/users/:id
+- DELETE /api/users/:id (admin)
+- POST /api/users/:id/avatar (загрузка файла)
 
-Orders (master):
-- Список заявок, смена статусов (approved/completed/rejected)
+Услуги
+- GET /api/services
+- POST /api/services (admin)
+- PATCH /api/services/:id (admin)
+- DELETE /api/services/:id (admin)
+- GET /api/services/:id/reviews
+- GET /api/services/:id/history
 
-MyOrders (user):
-- Список собственных заказов
-- Отмена pending заказа
+Отзывы
+- GET /api/reviews
+- POST /api/reviews (user)
+- PATCH /api/reviews/:id/like
+- PATCH /api/reviews/:id/dislike
+- DELETE /api/reviews/:id (admin)
 
-MasterStats / AdminStats:
-- Сводные метрики и таблицы по услугам
+Заказы
+- GET /api/orders
+- POST /api/orders (user)
+- PATCH /api/orders/:id (user)
+- PATCH /api/orders/:id/status (master/admin)
 
-NotFound:
-- 404 страница
+Избранное
+- GET /api/favorites (user)
+- POST /api/favorites/:serviceId (user)
+- DELETE /api/favorites/:serviceId (user)
 
-11) Связи между страницами и данными
-- Все страницы получают данные через useAppContext()
-- Навигация управляется router + useNavigate
-- Действия (лайк, отмена, одобрение) напрямую вызывают методы контекста
+Расписание
+- GET /api/schedule?date=YYYY-MM-DD&serviceId=ID&masterId=ID
 
-12) Стилизация
-- Глобальные стили и переменные: src/styles
-- Каждая страница имеет свой CSS файл, подключаемый прямо в TSX
-- Tailwind полностью удален
-- Ant Design продолжает отвечать за базовые стили UI компонентов
+7) Как работает авторизация (простыми словами)
+1. Пользователь логинится на /api/auth/login
+2. Сервер проверяет пароль и выдает JWT
+3. Клиент кладет JWT в localStorage под ключом access_token
+4. При каждом запросе клиент добавляет заголовок Authorization: Bearer <token>
+5. Сервер проверяет токен и решает, пускать или нет
 
-13) Сборка и запуск
-Скрипты:
-- npm run dev — запуск dev сервера
-- npm run build — production сборка
+8) Как работает загрузка аватара
+1. Клиент вызывает usersApi.uploadAvatar
+2. Отправляется FormData с файлом avatar
+3. Сервер сохраняет файл в server/uploads
+4. Сервер возвращает путь /uploads/имя_файла
+5. Этот путь сохраняется в users.avatar
+6. Клиент отображает картинку по /uploads/...
 
-14) Важные ограничения и допущения
-- Данные хранятся только в памяти (no backend)
-- localStorage используется только для сохранения текущего пользователя
-- При перезагрузке страницы данные возвращаются к мокам
+9) Как работает расписание
+1. Клиент вызывает /api/schedule с date + serviceId + masterId
+2. Сервер берет длительность услуги
+3. Сервер собирает занятость мастера по заказам
+4. Сервер строит тайм‑слоты с шагом 30 минут
+5. Сервер возвращает slots и busy
 
-15) Как расширять
-- Добавить API: заменить mockData + useState на загрузку/мутации через fetch/axios
-- Вынести бизнес‑логику в отдельный слой (services) при росте
-- Добавить типизацию для API и валидацию
+10) Как работают страницы (логика на пальцах)
+Home
+- Показывает услуги из services
 
-Документ создан автоматически в рабочей директории проекта.
+ServiceDetail
+- Получает details по услуге и отзывы
+- Дает добавить в избранное
+- Дает записаться (создает order)
+
+Orders (master)
+- Показывает заказы мастера
+- Дает менять статус
+
+MyOrders (user)
+- Показывает заказы пользователя
+- Дает отменить pending заказ
+
+ManageServices (admin)
+- CRUD по услугам
+
+UserManagement (admin)
+- CRUD по пользователям
+
+11) Где смотреть и править
+Клиент
+- UI и логика страниц: client/src/app/pages/
+- Глобальное состояние: client/src/app/context/AppContext.tsx
+- API вызовы: client/src/app/api.ts
+- Роуты: client/src/app/routes.tsx
+
+Сервер
+- Вся логика API: server/src/index.js
+- Подключение к БД: server/src/db.js
+- Миграции и сиды: server/sql/migrations/*.sql
+
+12) Важные технические факты
+- Токен живет в localStorage под ключом access_token
+- Сервер использует JWT и проверяет роль через middleware
+- Пароли хранятся в БД как хэш (bcrypt)
+- Если сиды были с plain‑text, при первом логине пароль хешируется
+- API документация доступна на /api/docs
+
+Документ создан и актуализирован на основании текущего кода.
