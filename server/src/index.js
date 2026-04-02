@@ -35,6 +35,23 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 })
 
+const parseTimeToMinutes = (value) => {
+  if (value === undefined || value === null) return null
+  const [hRaw, mRaw] = String(value).split(':')
+  if (hRaw === undefined || mRaw === undefined) return null
+  const hours = Number(hRaw)
+  const minutes = Number(mRaw)
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+  return hours * 60 + minutes
+}
+
+const formatMinutesToTime = (totalMinutes) => {
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
 const jwtConfig = (() => {
   const secret = process.env.JWT_SECRET
   const issuer = process.env.JWT_ISSUER
@@ -928,19 +945,25 @@ app.post('/api/orders', authenticateJwt, requireRole(['user']), async (req, res)
       [date, masterId]
     )
 
-    const duration = (await pool.query('select duration from services where id = $1', [serviceId]))
-      .rows[0].duration
+    const durationResult = await pool.query('select duration from services where id = $1', [serviceId])
+    if (durationResult.rows.length === 0) {
+      return res.status(404).json({ message: 'service not found' })
+    }
+    const duration = durationResult.rows[0].duration
     const busyIntervals = scheduleResult.rows.map((row) => {
-      const [h, m] = row.time_slot.split(':').map(Number)
-      const start = h * 60 + m
+      const start = parseTimeToMinutes(row.time_slot)
+      if (start === null) return null
       return { start, end: start + row.service_duration }
-    })
-    const startMinutes = (() => {
-      const [h, m] = String(timeSlot).split(':').map(Number)
-      return h * 60 + m
-    })()
+    }).filter(Boolean)
+
+    const startMinutes = parseTimeToMinutes(timeSlot)
+    if (startMinutes === null) {
+      return res.status(400).json({ message: 'invalid time slot' })
+    }
     const endMinutes = startMinutes + duration
-    const overlaps = busyIntervals.some((interval) => startMinutes < interval.end && endMinutes > interval.start)
+    const overlaps = busyIntervals.some(
+      (interval) => startMinutes < interval.end && endMinutes > interval.start
+    )
     const busyMinutes = busyIntervals.reduce((sum, row) => sum + (row.end - row.start), 0)
 
     if (overlaps || busyMinutes + duration > 600) {
@@ -948,11 +971,12 @@ app.post('/api/orders', authenticateJwt, requireRole(['user']), async (req, res)
     }
 
     const price = serviceResult.rows[0].price
+    const normalizedTimeSlot = formatMinutesToTime(startMinutes)
     const result = await pool.query(
       `insert into orders (service_id, user_id, status, date, time_slot, price, master_id)
        values ($1, $2, 'pending', $3, $4, $5, $6)
        returning *`,
-      [serviceId, req.user.id, date, timeSlot, price, masterId]
+      [serviceId, req.user.id, date, normalizedTimeSlot, price, masterId]
     )
     return res.status(201).json({ id: String(result.rows[0].id) })
   } catch (err) {
@@ -1081,15 +1105,18 @@ app.get('/api/schedule', async (req, res) => {
     const stepMinutes = 30
     const slots = []
 
-    const busyIntervals = ordersResult.rows.map((order) => {
-      const [h, m] = order.time_slot.split(':').map(Number)
-      const start = h * 60 + m
-      return {
-        start,
-        end: start + order.service_duration,
-        label: order.service_name,
-      }
-    })
+    const busyIntervals = ordersResult.rows
+      .map((order) => {
+        const start = parseTimeToMinutes(order.time_slot)
+        if (start === null) return null
+        const duration = Number(order.service_duration) || 0
+        return {
+          start,
+          end: start + duration,
+          label: order.service_name,
+        }
+      })
+      .filter(Boolean)
 
     const totalBusyMinutes = busyIntervals.reduce((sum, item) => sum + (item.end - item.start), 0)
 
@@ -1102,17 +1129,15 @@ app.get('/api/schedule', async (req, res) => {
       })
 
       const available = !overlaps && totalBusyMinutes + duration <= 600
-      const hours = Math.floor(time / 60)
-      const minutes = time % 60
       slots.push({
-        time: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+        time: formatMinutesToTime(time),
         available,
       })
     }
 
     const busy = busyIntervals.map((item) => ({
-      start: `${String(Math.floor(item.start / 60)).padStart(2, '0')}:${String(item.start % 60).padStart(2, '0')}`,
-      end: `${String(Math.floor(item.end / 60)).padStart(2, '0')}:${String(item.end % 60).padStart(2, '0')}`,
+      start: formatMinutesToTime(item.start),
+      end: formatMinutesToTime(item.end),
       label: item.label,
     }))
 
