@@ -1,12 +1,15 @@
- import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { UserRole, Service, Review, Order, User } from '../types';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { Service, Review, Order, User } from '../types';
 import {
-  users as initialUsers,
-  services as initialServices,
-  reviews as initialReviews,
-  orders as initialOrders,
-  favoriteServices as initialFavorites,
-} from '../data/mockData';
+  authApi,
+  usersApi,
+  servicesApi,
+  reviewsApi,
+  ordersApi,
+  favoritesApi,
+  scheduleApi,
+  tokenStore,
+} from '../api';
 
 interface AppContextType {
   currentUser: User | null;
@@ -22,100 +25,128 @@ interface AppContextType {
     password: string
   ) => Promise<{ ok: boolean; reason?: 'exists' | 'error' }>;
   users: User[];
-  addUser: (user: User) => void;
-  updateUser: (id: string, user: Partial<User>) => void;
-  deleteUser: (id: string) => void;
+  addUser: (user: User) => Promise<void>;
+  updateUser: (id: string, user: Partial<User>) => Promise<void>;
+  uploadAvatar: (id: string, file: File) => Promise<void>;
+  deleteUser: (id: string) => Promise<void>;
   services: Service[];
-  addService: (service: Service) => void;
-  updateService: (id: string, service: Partial<Service>) => void;
-  deleteService: (id: string) => void;
+  addService: (service: Service) => Promise<void>;
+  updateService: (id: string, service: Partial<Service>) => Promise<void>;
+  deleteService: (id: string) => Promise<void>;
   reviews: Review[];
-  addReview: (review: Review) => void;
-  deleteReview: (id: string) => void;
-  likeReview: (id: string) => void;
-  dislikeReview: (id: string) => void;
+  addReview: (review: Review) => Promise<void>;
+  deleteReview: (id: string) => Promise<void>;
+  likeReview: (id: string) => Promise<void>;
+  dislikeReview: (id: string) => Promise<void>;
   orders: Order[];
-  addOrder: (order: Order) => void;
-  updateOrder: (id: string, updatedData: Partial<Order>) => void;
-  updateOrderStatus: (id: string, status: Order['status'], masterId?: string, masterName?: string, masterAvatar?: string) => void;
+  addOrder: (order: Order) => Promise<void>;
+  updateOrder: (id: string, updatedData: Partial<Order>) => Promise<void>;
+  updateOrderStatus: (
+    id: string,
+    status: Order['status']
+  ) => Promise<void>;
   favorites: string[];
-  toggleFavorite: (serviceId: string) => void;
-  getAvailableTimeSlots: (date: string, serviceDuration: number) => { time: string; available: boolean }[];
+  toggleFavorite: (serviceId: string) => Promise<void>;
+  getAvailableTimeSlots: (
+    date: string,
+    serviceId: string
+  ) => Promise<{ time: string; available: boolean }[]>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>(initialUsers);
-  const [services, setServices] = useState<Service[]>(initialServices);
-  const [reviews, setReviews] = useState<Review[]>(initialReviews);
-  const [orders, setOrders] = useState<Order[]>(initialOrders);
-  const [favorites, setFavorites] = useState<string[]>(initialFavorites);
+  const [users, setUsers] = useState<User[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [favorites, setFavorites] = useState<string[]>([]);
 
-  // Проверка сохраненной сессии при загрузке
-  useEffect(() => {
-    const savedUserId = localStorage.getItem('currentUserId');
-    if (savedUserId) {
-      const user = users.find((u) => u.id === savedUserId);
-      if (user) {
-        setCurrentUser(user);
+  const loadServices = async () => {
+    const data = await servicesApi.list();
+    setServices(data);
+  };
+
+  const loadReviews = async () => {
+    const data = await reviewsApi.list();
+    setReviews(data);
+  };
+
+  const loadOrders = async () => {
+    const data = await ordersApi.list();
+    setOrders(data);
+  };
+
+  const loadUsers = async () => {
+    const data = await usersApi.list();
+    setUsers(data);
+  };
+
+  const loadFavorites = async () => {
+    const data = await favoritesApi.list();
+    setFavorites(data);
+  };
+
+  const bootstrap = async () => {
+    await loadServices();
+    await loadReviews();
+
+    const token = tokenStore.get();
+    if (!token) return;
+
+    try {
+      const me = await authApi.me();
+      setCurrentUser(me);
+
+      await loadOrders();
+      if (me.role === 'admin') {
+        await loadUsers();
       }
+      if (me.role === 'user') {
+        await loadFavorites();
+      }
+    } catch {
+      tokenStore.clear();
+      setCurrentUser(null);
     }
-  }, [users]);
+  };
+
+  useEffect(() => {
+    bootstrap();
+  }, []);
 
   const login = async (
     email: string,
     password: string
   ): Promise<{ ok: boolean; reason?: 'invalid' | 'error' }> => {
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (response.status === 401) {
+      const response = await authApi.login(email, password);
+      tokenStore.set(response.access_token);
+      setCurrentUser(response.user);
+      await loadServices();
+      await loadReviews();
+      await loadOrders();
+      if (response.user.role === 'admin') {
+        await loadUsers();
+      }
+      if (response.user.role === 'user') {
+        await loadFavorites();
+      }
+      return { ok: true };
+    } catch (err: any) {
+      if (err?.status === 401) {
         return { ok: false, reason: 'invalid' };
       }
-
-      if (!response.ok) {
-        return { ok: false, reason: 'error' };
-      }
-
-      const dbUser = await response.json();
-
-      const existing = users.find((u) => u.email === email);
-      const mergedUser: User = existing
-        ? { ...existing, role: dbUser.role }
-        : {
-            id: String(dbUser.id ?? Date.now()),
-            name: email.split('@')[0],
-            email,
-            password,
-            role: dbUser.role || 'user',
-            avatar: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70)}`,
-            createdAt:
-              typeof dbUser.created_at === 'string'
-                ? dbUser.created_at.split('T')[0]
-                : new Date().toISOString().split('T')[0],
-          };
-
-      if (!existing) {
-        setUsers((prev) => [...prev, mergedUser]);
-      }
-
-      setCurrentUser(mergedUser);
-      localStorage.setItem('currentUserId', mergedUser.id);
-      return { ok: true };
-    } catch {
       return { ok: false, reason: 'error' };
     }
   };
 
   const logout = () => {
     setCurrentUser(null);
-    localStorage.removeItem('currentUserId');
+    tokenStore.clear();
+    setOrders([]);
+    setFavorites([]);
   };
 
   const register = async (
@@ -124,183 +155,142 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     password: string
   ): Promise<{ ok: boolean; reason?: 'exists' | 'error' }> => {
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password_hash: password }),
-      });
-
-      if (response.status === 409) {
+      const response = await authApi.register(name, email, password);
+      tokenStore.set(response.access_token);
+      setCurrentUser(response.user);
+      await loadServices();
+      await loadReviews();
+      await loadOrders();
+      await loadFavorites();
+      return { ok: true };
+    } catch (err: any) {
+      if (err?.status === 409) {
         return { ok: false, reason: 'exists' };
       }
-
-      if (!response.ok) {
-        return { ok: false, reason: 'error' };
-      }
-
-      const created = await response.json();
-      const newUser: User = {
-        id: String(created.id ?? Date.now()),
-        name,
-        email,
-        password,
-        role: 'user', // По умолчанию роль пользователя
-        avatar: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70)}`,
-        createdAt:
-          typeof created.created_at === 'string'
-            ? created.created_at.split('T')[0]
-            : new Date().toISOString().split('T')[0],
-      };
-
-      setUsers((prev) => [...prev, newUser]);
-      setCurrentUser(newUser);
-      localStorage.setItem('currentUserId', newUser.id);
-      return { ok: true };
-    } catch {
       return { ok: false, reason: 'error' };
     }
   };
 
-  const addUser = (user: User) => {
-    setUsers([...users, user]);
+  const addUser = async (user: User) => {
+    const created = await usersApi.create({
+      name: user.name,
+      email: user.email,
+      password: user.password || 'default123',
+      role: user.role,
+      avatar: user.avatar,
+    });
+    setUsers((prev) => [created, ...prev]);
   };
 
-  const updateUser = (id: string, updatedData: Partial<User>) => {
-    setUsers(users.map((u) => (u.id === id ? { ...u, ...updatedData } : u)));
+  const updateUser = async (id: string, updatedData: Partial<User>) => {
+    const updated = await usersApi.update(id, {
+      name: updatedData.name,
+      email: updatedData.email,
+      role: updatedData.role,
+      avatar: updatedData.avatar,
+      rating: updatedData.rating,
+      servicesCount: updatedData.servicesCount,
+    });
+    setUsers((prev) => prev.map((u) => (u.id === id ? updated : u)));
     if (currentUser?.id === id) {
-      setCurrentUser({ ...currentUser, ...updatedData });
-      // Обновляем также localStorage для сохранения изменений
-      localStorage.setItem('currentUserId', id);
+      setCurrentUser(updated);
     }
   };
 
-  const deleteUser = (id: string) => {
-    setUsers(users.filter((u) => u.id !== id));
+  const uploadAvatar = async (id: string, file: File) => {
+    const updated = await usersApi.uploadAvatar(id, file);
+    setUsers((prev) => prev.map((u) => (u.id === id ? updated : u)));
+    if (currentUser?.id === id) {
+      setCurrentUser(updated);
+    }
   };
 
-  const addService = (service: Service) => {
-    setServices([...services, service]);
+  const deleteUser = async (id: string) => {
+    await usersApi.remove(id);
+    setUsers((prev) => prev.filter((u) => u.id !== id));
   };
 
-  const updateService = (id: string, updatedData: Partial<Service>) => {
-    setServices(services.map((s) => (s.id === id ? { ...s, ...updatedData } : s)));
-  };
-
-  const deleteService = (id: string) => {
-    setServices(services.filter((s) => s.id !== id));
-  };
-
-  const addReview = (review: Review) => {
-    setReviews([review, ...reviews]);
-    
-    // Обновляем рейтинг и количество отзывов услуги
-    const serviceReviews = [...reviews, review].filter(
-      (r) => r.serviceId === review.serviceId && !r.deleted
-    );
-    const avgRating =
-      serviceReviews.reduce((sum, r) => sum + r.rating, 0) / serviceReviews.length;
-    updateService(review.serviceId, {
-      rating: Math.round(avgRating * 10) / 10,
-      reviewsCount: serviceReviews.length,
+  const addService = async (service: Service) => {
+    const created = await servicesApi.create({
+      name: service.name,
+      description: service.description,
+      price: service.price,
+      duration: service.duration,
+      imageUrl: service.imageUrl,
     });
+    setServices((prev) => [created, ...prev]);
   };
 
-  const deleteReview = (id: string) => {
-    setReviews(
-      reviews.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              deleted: true,
-              comment: 'Отзыв удалён администратором',
-            }
-          : r
-      )
-    );
+  const updateService = async (id: string, updatedData: Partial<Service>) => {
+    const updated = await servicesApi.update(id, updatedData);
+    setServices((prev) => prev.map((s) => (s.id === id ? updated : s)));
   };
 
-  const likeReview = (id: string) => {
-    setReviews(reviews.map((r) => (r.id === id ? { ...r, likes: r.likes + 1 } : r)));
+  const deleteService = async (id: string) => {
+    await servicesApi.remove(id);
+    setServices((prev) => prev.filter((s) => s.id !== id));
   };
 
-  const dislikeReview = (id: string) => {
-    setReviews(reviews.map((r) => (r.id === id ? { ...r, dislikes: r.dislikes + 1 } : r)));
+  const addReview = async (review: Review) => {
+    await reviewsApi.create({
+      serviceId: review.serviceId,
+      rating: review.rating,
+      comment: review.comment,
+    });
+    await loadReviews();
+    await loadServices();
+    await loadOrders();
   };
 
-  const addOrder = (order: Order) => {
-    setOrders([...orders, order]);
+  const deleteReview = async (id: string) => {
+    await reviewsApi.remove(id);
+    await loadReviews();
+    await loadServices();
   };
 
-  const updateOrder = (id: string, updatedData: Partial<Order>) => {
-    setOrders(orders.map((o) => (o.id === id ? { ...o, ...updatedData } : o)));
+  const likeReview = async (id: string) => {
+    await reviewsApi.like(id);
+    await loadReviews();
   };
 
-  const updateOrderStatus = (
-    id: string,
-    status: Order['status'],
-    masterId?: string,
-    masterName?: string,
-    masterAvatar?: string
-  ) => {
-    setOrders(
-      orders.map((o) =>
-        o.id === id ? { ...o, status, ...(masterId && { masterId, masterName, masterAvatar }) } : o
-      )
-    );
+  const dislikeReview = async (id: string) => {
+    await reviewsApi.dislike(id);
+    await loadReviews();
   };
 
-  const toggleFavorite = (serviceId: string) => {
+  const addOrder = async (order: Order) => {
+    await ordersApi.create({
+      serviceId: order.serviceId,
+      date: order.date,
+      timeSlot: order.timeSlot,
+    });
+    await loadOrders();
+  };
+
+  const updateOrder = async (id: string, updatedData: Partial<Order>) => {
+    if (updatedData.status) {
+      await ordersApi.update(id, { status: updatedData.status });
+      await loadOrders();
+    }
+  };
+
+  const updateOrderStatus = async (id: string, status: Order['status']) => {
+    await ordersApi.updateStatus(id, status);
+    await loadOrders();
+  };
+
+  const toggleFavorite = async (serviceId: string) => {
     if (favorites.includes(serviceId)) {
-      setFavorites(favorites.filter((id) => id !== serviceId));
+      await favoritesApi.remove(serviceId);
+      setFavorites((prev) => prev.filter((id) => id !== serviceId));
     } else {
-      setFavorites([...favorites, serviceId]);
+      await favoritesApi.add(serviceId);
+      setFavorites((prev) => [...prev, serviceId]);
     }
   };
 
-  // Генерация временных слотов с учетом ограничения 10 часов в день
-  const getAvailableTimeSlots = (
-    date: string,
-    serviceDuration: number
-  ): { time: string; available: boolean }[] => {
-    const slots: { time: string; available: boolean }[] = [];
-    const workStart = 9; // Начало рабочего дня
-    const workEnd = 21; // Конец рабочего дня
-
-    // Получаем все заказы на выбранную дату
-    const dayOrders = orders.filter((o) => o.date === date && o.status !== 'rejected');
-
-    // Вычисляем занятое время у мастеров
-    const masterSchedule: { [masterId: string]: number } = {};
-    dayOrders.forEach((order) => {
-      if (order.masterId && order.status !== 'rejected') {
-        const service = services.find((s) => s.id === order.serviceId);
-        if (service) {
-          masterSchedule[order.masterId] =
-            (masterSchedule[order.masterId] || 0) + service.duration;
-        }
-      }
-    });
-
-    // Генерируем слоты с шагом в 1 час
-    for (let hour = workStart; hour < workEnd; hour++) {
-      const time = `${hour.toString().padStart(2, '0')}:00`;
-      const isOccupied = dayOrders.some((o) => o.timeSlot === time);
-
-      // Проверяем, есть ли свободный мастер (у которого меньше 10 часов занято)
-      const availableMaster = users
-        .filter((u) => u.role === 'master')
-        .find((master) => {
-          const busyMinutes = masterSchedule[master.id] || 0;
-          return busyMinutes + serviceDuration <= 600; // 10 часов = 600 минут
-        });
-
-      slots.push({
-        time,
-        available: !isOccupied && !!availableMaster,
-      });
-    }
-
-    return slots;
+  const getAvailableTimeSlots = async (date: string, serviceId: string) => {
+    return scheduleApi.get(date, serviceId);
   };
 
   return (
@@ -314,6 +304,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         users,
         addUser,
         updateUser,
+        uploadAvatar,
         deleteUser,
         services,
         addService,

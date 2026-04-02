@@ -38,14 +38,14 @@ export const ManageServices: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    deleteService(id);
+  const handleDelete = async (id: string) => {
+    await deleteService(id);
     message.success('Услуга успешно удалена');
   };
 
   const handleSubmit = async (values: any) => {
     if (editingService) {
-      updateService(editingService.id, values);
+      await updateService(editingService.id, values);
       message.success('Услуга успешно обновлена');
     } else {
       const newService: Service = {
@@ -54,7 +54,7 @@ export const ManageServices: React.FC = () => {
         rating: 0,
         reviewsCount: 0,
       };
-      addService(newService);
+      await addService(newService);
       message.success('Услуга успешно добавлена');
     }
     setIsModalOpen(false);

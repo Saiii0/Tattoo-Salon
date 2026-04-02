@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, Table, Tag, Button, Space, Avatar, message, Modal, Typography } from 'antd';
-import { CheckOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
+import { CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { useAppContext } from '../context/AppContext';
 import type { ColumnsType } from 'antd/es/table';
 import type { Order } from '../types';
@@ -9,11 +9,11 @@ import './Orders.css';
 const { Text } = Typography;
 
 export const Orders: React.FC = () => {
-  const { orders, updateOrderStatus, currentUser, users } = useAppContext();
+  const { orders, updateOrderStatus, currentUser } = useAppContext();
 
-  const handleApprove = (orderId: string) => {
+  const handleApprove = async (orderId: string) => {
     if (!currentUser) return;
-    updateOrderStatus(orderId, 'approved', currentUser.id, currentUser.name, currentUser.avatar);
+    await updateOrderStatus(orderId, 'approved');
     message.success('Заявка одобрена');
   };
 
@@ -23,8 +23,8 @@ export const Orders: React.FC = () => {
       content: 'Вы уверены, что хотите отклонить эту заявку?',
       okText: 'Да',
       cancelText: 'Нет',
-      onOk: () => {
-        updateOrderStatus(orderId, 'rejected');
+      onOk: async () => {
+        await updateOrderStatus(orderId, 'rejected');
         message.success('Заявка отклонена');
       },
     });
@@ -36,8 +36,8 @@ export const Orders: React.FC = () => {
       content: 'Подтвердите, что работа выполнена',
       okText: 'Да',
       cancelText: 'Нет',
-      onOk: () => {
-        updateOrderStatus(orderId, 'completed');
+      onOk: async () => {
+        await updateOrderStatus(orderId, 'completed');
         message.success('Заказ завершён');
       },
     });

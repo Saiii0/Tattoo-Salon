@@ -14,14 +14,15 @@ import {
 } from 'antd';
 import { UserOutlined, StarOutlined, CheckCircleOutlined, CameraOutlined } from '@ant-design/icons';
 import { useAppContext } from '../context/AppContext';
-import type { UploadFile } from 'antd/es/upload/interface';
+import type { UploadRequestOption } from 'rc-upload/lib/interface';
 import './Profile.css';
 
 const { Title } = Typography;
 
 export const Profile: React.FC = () => {
-  const { currentUser, updateUser } = useAppContext();
+  const { currentUser, updateUser, uploadAvatar } = useAppContext();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   if (!currentUser) {
     return null;
@@ -49,10 +50,14 @@ export const Profile: React.FC = () => {
     }
   };
 
-  const handleAvatarChange = (newAvatarUrl: string) => {
-    updateUser(currentUser.id, { avatar: newAvatarUrl });
-    message.success('Фото профиля обновлено!');
-    setIsUploadModalOpen(false);
+  const handleAvatarChange = async (newAvatarUrl: string) => {
+    try {
+      await updateUser(currentUser.id, { avatar: newAvatarUrl });
+      message.success('Фото профиля обновлено!');
+      setIsUploadModalOpen(false);
+    } catch {
+      message.error('Не удалось обновить фото');
+    }
   };
 
   // Генерация случайного аватара
@@ -60,6 +65,20 @@ export const Profile: React.FC = () => {
     const randomNum = Math.floor(Math.random() * 70) + 1;
     const newAvatar = `https://i.pravatar.cc/150?img=${randomNum}`;
     handleAvatarChange(newAvatar);
+  };
+
+  const handleUpload = async (options: UploadRequestOption) => {
+    const file = options.file as File;
+    setIsUploading(true);
+    try {
+      await uploadAvatar(currentUser.id, file);
+      message.success('Фото профиля загружено');
+      setIsUploadModalOpen(false);
+    } catch {
+      message.error('Не удалось загрузить фото');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -151,6 +170,19 @@ export const Profile: React.FC = () => {
             >
               Сгенерировать случайное фото
             </Button>
+          </div>
+
+          <div className="profile__modal-action">
+            <Upload
+              accept="image/*"
+              showUploadList={false}
+              customRequest={handleUpload}
+              disabled={isUploading}
+            >
+              <Button block loading={isUploading}>
+                Загрузить своё фото
+              </Button>
+            </Upload>
           </div>
 
           <div className="profile__modal-note">

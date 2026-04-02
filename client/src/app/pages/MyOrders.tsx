@@ -33,8 +33,8 @@ export const MyOrders: React.FC = () => {
       okText: 'Да, отменить',
       cancelText: 'Нет',
       okType: 'danger',
-      onOk: () => {
-        updateOrder(order.id, { status: 'cancelled' });
+      onOk: async () => {
+        await updateOrder(order.id, { status: 'cancelled' });
         message.success('Заказ успешно отменен');
       },
     });

@@ -41,18 +41,18 @@ export const UserManagement: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (id === currentUser?.id) {
       message.error('Вы не можете удалить свой аккаунт');
       return;
     }
-    deleteUser(id);
+    await deleteUser(id);
     message.success('Пользователь успешно удален');
   };
 
   const handleSubmit = async (values: any) => {
     if (editingUser) {
-      updateUser(editingUser.id, {
+      await updateUser(editingUser.id, {
         name: values.name,
         email: values.email,
         role: values.role,
@@ -76,7 +76,7 @@ export const UserManagement: React.FC = () => {
         return;
       }
 
-      addUser(newUser);
+      await addUser(newUser);
       message.success('Пользователь успешно добавлен');
     }
     setIsModalOpen(false);

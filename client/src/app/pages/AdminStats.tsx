@@ -33,8 +33,9 @@ export const AdminStats: React.FC = () => {
   const completedOrders = orders.filter((o) => o.status === 'completed').length;
   const pendingOrders = orders.filter((o) => o.status === 'pending').length;
 
-  const averageRating =
-    services.reduce((sum, s) => sum + s.rating, 0) / services.length;
+  const averageRating = services.length
+    ? services.reduce((sum, s) => sum + s.rating, 0) / services.length
+    : 0;
 
   const totalReviews = reviews.filter((r) => !r.deleted).length;
 

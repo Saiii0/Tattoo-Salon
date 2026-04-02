@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Card,
   Typography,
@@ -29,7 +29,8 @@ import {
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router';
 import { useAppContext } from '../context/AppContext';
-import { clientHistory } from '../data/mockData';
+import { servicesApi } from '../api';
+import type { ClientHistory } from '../types';
 import dayjs, { Dayjs } from 'dayjs';
 import './ServiceDetail.css';
 
@@ -51,6 +52,7 @@ export const ServiceDetail: React.FC = () => {
     currentUser,
     addOrder,
     getAvailableTimeSlots,
+    orders,
   } = useAppContext();
 
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
@@ -58,10 +60,12 @@ export const ServiceDetail: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null);
   const [selectedTime, setSelectedTime] = useState<string>('');
   const [reviewForm] = Form.useForm();
+  const [serviceHistory, setServiceHistory] = useState<ClientHistory[]>([]);
+  const [timeSlots, setTimeSlots] = useState<{ time: string; available: boolean }[]>([]);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
 
   const service = services.find((s) => s.id === id);
   const serviceReviews = reviews.filter((r) => r.serviceId === id);
-  const serviceHistory = clientHistory.filter((h) => h.serviceId === id);
   const isFavorite = favorites.includes(id || '');
 
   // Проверяем, есть ли у пользователя завершенный заказ этой услуги без отзыва
@@ -87,6 +91,10 @@ export const ServiceDetail: React.FC = () => {
 
   const handleAddReview = async (values: any) => {
     if (!currentUser) return;
+    if (!canLeaveReview()) {
+      message.error('Оставить отзыв можно только после завершенного заказа');
+      return;
+    }
 
     const newReview = {
       id: Date.now().toString(),
@@ -101,13 +109,17 @@ export const ServiceDetail: React.FC = () => {
       date: new Date().toISOString().split('T')[0],
     };
 
-    addReview(newReview);
-    message.success('Отзыв успешно добавлен!');
-    setIsReviewModalOpen(false);
-    reviewForm.resetFields();
+    try {
+      await addReview(newReview);
+      message.success('Отзыв успешно добавлен!');
+      setIsReviewModalOpen(false);
+      reviewForm.resetFields();
+    } catch {
+      message.error('Не удалось добавить отзыв');
+    }
   };
 
-  const handleOrder = () => {
+  const handleOrder = async () => {
     if (!currentUser || !selectedDate || !selectedTime) {
       message.error('Выберите дату и время записи');
       return;
@@ -126,16 +138,32 @@ export const ServiceDetail: React.FC = () => {
       price: service.price,
     };
 
-    addOrder(newOrder);
-    message.success('Заявка успешно отправлена! Мастер свяжется с вами в ближайшее время.');
-    setIsOrderModalOpen(false);
-    setSelectedDate(null);
-    setSelectedTime('');
+    try {
+      await addOrder(newOrder);
+      message.success('Заявка успешно отправлена! Мастер свяжется с вами в ближайшее время.');
+      setIsOrderModalOpen(false);
+      setSelectedDate(null);
+      setSelectedTime('');
+    } catch {
+      message.error('Не удалось отправить заявку');
+    }
   };
 
-  const timeSlots = selectedDate
-    ? getAvailableTimeSlots(selectedDate.format('YYYY-MM-DD'), service.duration)
-    : [];
+  useEffect(() => {
+    if (!id) return;
+    servicesApi.getHistory(id).then(setServiceHistory).catch(() => setServiceHistory([]));
+  }, [id]);
+
+  useEffect(() => {
+    if (!selectedDate || !service) {
+      setTimeSlots([]);
+      return;
+    }
+    setIsLoadingSlots(true);
+    getAvailableTimeSlots(selectedDate.format('YYYY-MM-DD'), service.id)
+      .then(setTimeSlots)
+      .finally(() => setIsLoadingSlots(false));
+  }, [selectedDate, service, getAvailableTimeSlots]);
 
   const disabledDate = (current: Dayjs) => {
     // Запрет на выбор прошлых дат
@@ -251,7 +279,11 @@ export const ServiceDetail: React.FC = () => {
         className="service-detail__card service-detail__card--spaced"
         title="Отзывы"
         extra={
-          <Button type="primary" onClick={() => setIsReviewModalOpen(true)}>
+          <Button
+            type="primary"
+            onClick={() => setIsReviewModalOpen(true)}
+            disabled={!canLeaveReview()}
+          >
             Оставить отзыв
           </Button>
         }
@@ -425,6 +457,7 @@ export const ServiceDetail: React.FC = () => {
                 showIcon
                 className="service-detail__time-alert"
               />
+              {isLoadingSlots && <Text type="secondary">Загрузка слотов...</Text>}
               <Radio.Group
                 value={selectedTime}
                 onChange={(e) => setSelectedTime(e.target.value)}
